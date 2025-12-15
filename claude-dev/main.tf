@@ -113,48 +113,62 @@ resource "coder_agent" "main" {
       npm install -g @anthropic-ai/claude-code
     fi
 
-    # Install pipx and SuperClaude during runtime
-    if ! command -v superclaude &> /dev/null && [ ! -d "$HOME/.claude/commands" ]; then
-      echo "Installing pipx and SuperClaude..."
+    # Install SuperClaude in background (non-blocking)
+    echo "Starting SuperClaude installation in background..."
+    {
+      echo "$(date): Starting SuperClaude installation..." > ~/.superclaude_install.log
       
-      # Install pipx using pip
-      python3 -m pip install --user pipx
+      # Install pipx and SuperClaude
+      if ! command -v superclaude >/dev/null 2>&1; then
+        echo "$(date): Installing pipx..." >> ~/.superclaude_install.log
+        python3 -m pip install --user pipx >>~/.superclaude_install.log 2>&1
+        
+        # Ensure PATH is updated for this session
+        export PATH="$HOME/.local/bin:$PATH"
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+        
+        echo "$(date): Installing SuperClaude from GitHub..." >> ~/.superclaude_install.log
+        python3 -m pipx install git+https://github.com/NomenAK/SuperClaude.git >>~/.superclaude_install.log 2>&1
+        
+        # Install Playwright (this takes time, so do it in background)
+        echo "$(date): Installing Playwright..." >> ~/.superclaude_install.log
+        python3 -m pipx inject superclaude playwright >>~/.superclaude_install.log 2>&1
+        ~/.local/share/pipx/venvs/superclaude/bin/python -m playwright install chromium >>~/.superclaude_install.log 2>&1
+        
+        echo "$(date): SuperClaude installation completed successfully" >> ~/.superclaude_install.log
+      else
+        echo "$(date): SuperClaude already installed" >> ~/.superclaude_install.log
+      fi
       
-      # Ensure pipx is properly set up
-      python3 -m pipx ensurepath
-      export PATH="$HOME/.local/bin:$PATH"
-      
-      # Install SuperClaude using pipx (handles virtual env automatically)
-      python3 -m pipx install git+https://github.com/NomenAK/SuperClaude.git
-      
-      # Install Playwright and browsers for SuperClaude
-      echo "Installing Playwright and browsers for SuperClaude..."
-      python3 -m pipx inject superclaude playwright
-      ~/.local/share/pipx/venvs/superclaude/bin/python -m playwright install chromium
-      
-      # Add pipx bin to permanent PATH
-      echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-      
-      echo "SuperClaude installed successfully with pipx and Playwright"
-      
-      # Configure SuperClaude with Tavily API key if available
+      # Configure with Tavily API key if available
       if [ -n "$TAVILY_API_KEY" ]; then
-        echo "Configuring SuperClaude with Tavily API key..."
+        echo "$(date): Configuring SuperClaude with Tavily API key..." >> ~/.superclaude_install.log
         mkdir -p ~/.config/superclaude
         cat > ~/.config/superclaude/config.json << EOF
 {
-  "tavily_api_key": "$TAVILY_API_KEY",
+  "tavily_api_key": "$TAVILY_API_KEY", 
   "search_provider": "tavily"
 }
 EOF
-        
-        # Also set it in environment for SuperClaude
         echo 'export TAVILY_API_KEY="$TAVILY_API_KEY"' >> ~/.bashrc
+        echo "$(date): SuperClaude configured with Tavily integration" >> ~/.superclaude_install.log
       fi
-    fi
+    } &
+    
+    # Continue with startup while SuperClaude installs in background
+    echo "✅ SuperClaude installation started (background process - check ~/.superclaude_install.log)"
 
     # Note: GitHub CLI configuration will be done after secret retrieval is set up
 
+    # Initialize git repository in projects directory for MCP git server
+    cd /home/coder/projects
+    if [ ! -d ".git" ]; then
+      echo "Initializing git repository for MCP git server..."
+      git init
+      git config user.name "Workspace User"
+      git config user.email "user@workspace.local"
+    fi
+    
     # Configure secrets management and authentication
     echo "=== Configuring Secrets and Authentication ==="
     
@@ -195,6 +209,7 @@ EOF
     export TAVILY_API_KEY="$TAVILY_API_KEY"
     export GITHUB_TOKEN="$GITHUB_TOKEN"
     export GITHUB_PERSONAL_ACCESS_TOKEN="$GITHUB_TOKEN"
+    export GH_TOKEN="$GITHUB_TOKEN"
     export BRAVE_API_KEY="$TAVILY_API_KEY"
     export MORPHLLM_API_KEY="$MORPHLLM_API_KEY"
     
@@ -203,6 +218,7 @@ EOF
     echo "export TAVILY_API_KEY='$TAVILY_API_KEY'" >> ~/.bashrc
     echo "export GITHUB_TOKEN='$GITHUB_TOKEN'" >> ~/.bashrc
     echo "export GITHUB_PERSONAL_ACCESS_TOKEN='$GITHUB_TOKEN'" >> ~/.bashrc
+    echo "export GH_TOKEN='$GITHUB_TOKEN'" >> ~/.bashrc
     echo "export BRAVE_API_KEY='$TAVILY_API_KEY'" >> ~/.bashrc
     echo "export MORPHLLM_API_KEY='$MORPHLLM_API_KEY'" >> ~/.bashrc
     
@@ -226,11 +242,32 @@ EOF
         # Authenticate GitHub CLI
         echo "$GITHUB_TOKEN" | gh auth login --with-token || true
         
-        # Configure git with GitHub user info
-        gh api user | jq -r .name | xargs -I {} git config --global user.name "{}" || true
-        gh api user | jq -r .email | xargs -I {} git config --global user.email "{}" || true
+        # Configure git with GitHub user info (with fallbacks)
+        GH_USER_NAME=$(gh api user 2>/dev/null | jq -r .name 2>/dev/null || echo "")
+        GH_USER_EMAIL=$(gh api user 2>/dev/null | jq -r .email 2>/dev/null || echo "")
+        
+        if [ -n "$GH_USER_NAME" ] && [ "$GH_USER_NAME" != "null" ]; then
+          git config --global user.name "$GH_USER_NAME"
+          echo "✅ Git user.name set to: $GH_USER_NAME"
+        else
+          git config --global user.name "Coder User"
+          echo "⚠️  Using fallback git user.name: Coder User"
+        fi
+        
+        if [ -n "$GH_USER_EMAIL" ] && [ "$GH_USER_EMAIL" != "null" ]; then
+          git config --global user.email "$GH_USER_EMAIL"
+          echo "✅ Git user.email set to: $GH_USER_EMAIL"
+        else
+          git config --global user.email "user@workspace.local"
+          echo "⚠️  Using fallback git user.email: user@workspace.local"
+        fi
     else
         echo "⚠️  GITHUB_TOKEN not found - GitHub features will be skipped"
+        
+        # Set fallback git configuration when no GitHub token
+        git config --global user.name "Coder User"
+        git config --global user.email "user@workspace.local"
+        echo "✅ Set fallback git configuration"
     fi
     
     if [ -n "$TAVILY_API_KEY" ]; then
@@ -407,7 +444,7 @@ EOF
         echo "⚠️  Web search limited (no Tavily API key)"
     fi
     
-    echo "✓ SuperClaude installed with pipx"
+    echo "✓ SuperClaude installing in background (check ~/.superclaude_install.log)"
     echo ""
     echo "🚀 Start coding with: cd /home/coder/projects && claude"
     # echo "🌐 Or use code-server: http://localhost:8080" # Removed for minimal build

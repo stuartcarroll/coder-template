@@ -8,7 +8,7 @@ FROM ubuntu:24.04
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install only essential packages in one layer
+# Install essential packages + Python for SuperClaude
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
@@ -19,6 +19,10 @@ RUN apt-get update && apt-get install -y \
     openssh-client \
     build-essential \
     locales \
+    python3 \
+    python3-pip \
+    python3-venv \
+    jq \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -61,6 +65,8 @@ RUN useradd --create-home --shell /bin/bash coder \
 #===============================================================================
 USER coder
 WORKDIR /home/coder
+
+# SuperClaude will be installed at runtime to avoid build complexity
 
 #===============================================================================
 # Create project directory
