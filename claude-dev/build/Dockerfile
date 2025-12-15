@@ -84,11 +84,10 @@ RUN git config --global init.defaultBranch main \
 # Helper scripts and Claude configuration
 #===============================================================================
 RUN mkdir -p /home/coder/bin /home/coder/.claude
-COPY --chown=coder:coder get-secret.sh /home/coder/bin/get-secret
 COPY --chown=coder:coder init-claude-context.sh /home/coder/bin/init-claude-context
 COPY --chown=coder:coder CLAUDE.md /home/coder/.claude/WORKSPACE_CONTEXT.md
 COPY --chown=coder:coder claude-startup-prompt.md /home/coder/.claude/STARTUP_PROMPT.md
-RUN chmod +x /home/coder/bin/get-secret /home/coder/bin/init-claude-context
+RUN chmod +x /home/coder/bin/init-claude-context
 ENV PATH="/home/coder/bin:$PATH"
 
 #===============================================================================

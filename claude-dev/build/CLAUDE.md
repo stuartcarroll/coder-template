@@ -4,10 +4,10 @@ This workspace is a Coder development environment with integrated secrets manage
 
 ## Secrets Management System
 
-### File-Based Secrets Location
-- **Primary**: `/opt/secrets/manage-secrets.sh` - File-based secrets system
-- **Fallback**: Environment variables (`TF_VAR_*`)
-- **Helper**: `get-secret` command for retrieving any secret
+### Infisical Integration
+- **Primary**: Environment variables injected by Infisical
+- **Access**: Secrets are available as standard environment variables
+- **No Helper Needed**: Direct access via `$VARIABLE_NAME`
 
 ### Available API Keys
 The following secrets are dynamically configured in this workspace:
@@ -20,19 +20,19 @@ The following secrets are dynamically configured in this workspace:
 
 #### Usage in Code
 ```bash
-# Retrieve any secret safely
-API_KEY=$(get-secret ANTHROPIC_API_KEY)
+# Access secrets directly from environment
+API_KEY="$ANTHROPIC_API_KEY"
 
 # Check if optional secrets are available
-if get-secret GITHUB_TOKEN >/dev/null 2>&1; then
+if [ -n "$GITHUB_TOKEN" ]; then
     echo "GitHub integration available"
 fi
 ```
 
 ### Secrets Commands
-- `get-secret SECRET_NAME` - Retrieve any secret with fallback
+- `env | grep -E 'ANTHROPIC|GITHUB|TAVILY'` - View available secrets
+- `gh auth status` - Check GitHub authentication
 - `claude-auth` - Comprehensive authentication testing
-- `/opt/secrets/manage-secrets.sh get-secret NAME` - Direct file-based access
 
 ## Development Patterns
 

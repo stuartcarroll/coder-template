@@ -121,7 +121,7 @@ resource "coder_agent" "main" {
       # Install pipx and SuperClaude
       if ! command -v superclaude >/dev/null 2>&1; then
         echo "$(date): Installing pipx..." >> ~/.superclaude_install.log
-        python3 -m pip install --user pipx >>~/.superclaude_install.log 2>&1
+        python3 -m pip install --user --break-system-packages pipx >>~/.superclaude_install.log 2>&1
         
         # Ensure PATH is updated for this session
         export PATH="$HOME/.local/bin:$PATH"
@@ -169,40 +169,14 @@ EOF
       git config user.email "user@workspace.local"
     fi
     
-    # Configure secrets management and authentication
-    echo "=== Configuring Secrets and Authentication ==="
+    # Configure authentication from environment (secrets injected by Infisical)
+    echo "=== Configuring Authentication ==="
     
-    # Initialize secret retrieval function
-    get_secret() {
-        local secret_name="$1"
-        local secret_value
-        local secrets_script="/opt/secrets/manage-secrets.sh"
-        
-        # Try file-based secrets first
-        if [ -x "$secrets_script" ]; then
-            secret_value=$($secrets_script get-secret "$secret_name" 2>/dev/null || echo "")
-            if [ -n "$secret_value" ]; then
-                echo "$secret_value"
-                return 0
-            fi
-        fi
-        
-        # Fall back to environment variable
-        local tf_var_name="TF_VAR_$(echo $secret_name | tr '[:upper:]' '[:lower:]')"
-        secret_value=$(eval "echo \$$tf_var_name")
-        echo "$secret_value"
-    }
+    # All secrets are provided via environment variables by Infisical
+    echo "Using Infisical-injected environment variables..."
     
-    # Retrieve all required secrets
-    echo "Retrieving API keys from secrets management system..."
-    
-    # Required secrets
-    ANTHROPIC_API_KEY=$(get_secret "ANTHROPIC_API_KEY")
-    
-    # Optional secrets
-    GITHUB_TOKEN=$(get_secret "GITHUB_TOKEN")
-    TAVILY_API_KEY=$(get_secret "TAVILY_API_KEY")
-    MORPHLLM_API_KEY=$(get_secret "MORPHLLM_API_KEY")
+    # These are already set in the environment by the container configuration
+    # Just validate they exist
     
     # Export environment variables
     export ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
@@ -224,8 +198,8 @@ EOF
     
     # Validate required secrets
     if [ -z "$ANTHROPIC_API_KEY" ]; then
-        echo "❌ ERROR: ANTHROPIC_API_KEY is required but not found in secrets or environment"
-        echo "Please ensure it's available in /opt/secrets or set TF_VAR_anthropic_api_key"
+        echo "❌ ERROR: ANTHROPIC_API_KEY is required but not found in environment"
+        echo "Please ensure it's injected via Infisical or set as environment variable"
         # Don't exit, but Claude Code won't work
     else
         echo "✅ ANTHROPIC_API_KEY found and configured"
@@ -240,7 +214,14 @@ EOF
         chmod 600 ~/.git-credentials
         
         # Authenticate GitHub CLI
-        echo "$GITHUB_TOKEN" | gh auth login --with-token || true
+        echo "$GITHUB_TOKEN" | gh auth login --with-token
+        
+        # Verify authentication worked
+        if gh auth status >/dev/null 2>&1; then
+          echo "✅ GitHub CLI authentication successful"
+        else
+          echo "⚠️  GitHub CLI authentication failed, but token is available in environment"
+        fi
         
         # Configure git with GitHub user info (with fallbacks)
         GH_USER_NAME=$(gh api user 2>/dev/null | jq -r .name 2>/dev/null || echo "")
@@ -462,8 +443,8 @@ EOF
     echo ""
     echo "🔧 Commands:"
     echo "   Test authentication: claude-auth"
-    echo "   Check secrets: get-secret ANTHROPIC_API_KEY"
-    echo "   List MCPs: cd /home/coder/projects && claude --list-mcps"
+    echo "   Check environment: env | grep -E 'ANTHROPIC|GITHUB|TAVILY'"
+    echo "   Check GitHub: gh auth status"
     echo "   Claude context: cat ~/.claude/WORKSPACE_CONTEXT.md"
     
     # Initialize Claude context with workspace information
@@ -473,7 +454,7 @@ EOF
     
     echo ""
     echo "💡 Claude is now pre-configured with knowledge of:"
-    echo "   • Secrets management system (/opt/secrets + get-secret)"
+    echo "   • Infisical secrets management (environment variables)"
     echo "   • Development pattern: $DEV_PATTERN"
     echo "   • Available services and MCPs"
     echo "   • Workspace layout and tools"
@@ -674,12 +655,7 @@ resource "docker_container" "workspace" {
     read_only      = true
   }
 
-  # Secrets management system
-  volumes {
-    container_path = "/opt/secrets"
-    host_path      = "/opt/secrets"
-    read_only      = true
-  }
+  # Secrets are now handled via Infisical environment injection
 
   # Keep container running
   stdin_open = true
